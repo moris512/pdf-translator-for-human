@@ -410,7 +410,7 @@ def main():
                                 min(st.session_state.current_page + pages_per_load, doc.page_count)):
                 page = doc[page_num]
                 pix = get_page_image(page)
-                st.image(pix.tobytes(), caption=f"Page {page_num + 1}", use_container_width=True)
+                st.image(pix.tobytes(), caption=f"Page {page_num + 1}")
         
         # Translation column
         with col2:
@@ -448,7 +448,7 @@ def main():
                 for i, trans_doc in enumerate(translated_pages):
                     page = trans_doc[0]
                     pix = get_page_image(page)
-                    st.image(pix.tobytes(), caption=f"Page {st.session_state.current_page + i + 1}", use_container_width=True)
+                    st.image(pix.tobytes(), caption=f"Page {st.session_state.current_page + i + 1}")
             
             except Exception as e:
                 st.error(f"Translation error: {str(e)}")
@@ -462,29 +462,28 @@ def main():
         # Previous Pages button
         with button_col1:
             if st.session_state.current_page > 0:
-                if st.button("Previous Pages", use_container_width=True):
+                if st.button("Previous Pages"):
                     st.session_state.current_page = max(0, st.session_state.current_page - pages_per_load)
                     st.rerun()
             else:
-                st.button("Previous Pages", disabled=True, use_container_width=True)
+                st.button("Previous Pages", disabled=True)
         
         # Next Pages button
         with button_col2:
             if st.session_state.current_page + pages_per_load < doc.page_count:
-                if st.button("Next Pages", use_container_width=True):
+                if st.button("Next Pages"):
                     st.session_state.current_page = min(
                         doc.page_count - 1,
                         st.session_state.current_page + pages_per_load
                     )
                     st.rerun()
             else:
-                st.button("Next Pages", disabled=True, use_container_width=True)
+                st.button("Next Pages", disabled=True)
         
         # Translate All button
         with button_col3:
             if st.button("Translate All", 
-                        disabled=st.session_state.all_translated,
-                        use_container_width=True):
+                        disabled=st.session_state.all_translated):
                 try:
                     # Initialize translator based on user selection
                     if translator_type == "Google":
@@ -541,8 +540,7 @@ def main():
                         "Download",
                         file,
                         file_name=f"translated_{uploaded_file.name}",
-                        mime="application/pdf",
-                        use_container_width=True
+                        mime="application/pdf"
                     )
     else:
         st.info("Please upload a PDF file to begin translation")
