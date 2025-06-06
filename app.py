@@ -11,6 +11,16 @@ from deep_translator.openai_compatible import OpenAICompatibleTranslator
 import logging
 import argparse
 
+# Import download utilities
+from download_utils import create_download_button, check_file_exists
+
+# Import helper for complete document translation and download
+try:
+    from download_helper import create_complete_translation, download_translated_pdf
+except ImportError:
+    # If the helper module isn't available, we'll use inline functions
+    pass
+
 # Constants
 DEFAULT_PAGES_PER_LOAD = 2
 DEFAULT_MODEL = "default_model"
@@ -281,14 +291,12 @@ def translate_all_pages(
     output_path = kwargs.get('output_path', 'output.pdf')
     for trans_doc in translated_pages:
         output_doc.insert_pdf(trans_doc)
-    
-    # Save with compression options
+      # Save with compression options
     output_doc.save(
         output_path,
         garbage=4,
         deflate=True,
-        clean=True,
-        linear=True
+        clean=True
     )
     
     return output_doc
@@ -307,6 +315,49 @@ def init_session_state():
         st.session_state.previous_file = None
     if 'api_settings' not in st.session_state:
         st.session_state.api_settings = {}
+
+def create_complete_translation(doc, translator_type, source_lang, target_lang_code, text_color, api_settings, file_name):
+    """Create a complete translation of the document and prepare it for download"""
+    try:
+        # Initialize translator based on user selection
+        if translator_type == "Google":
+            translator = GoogleTranslator(
+                source=source_lang,
+                target=target_lang_code
+            )
+        else:
+            translator = OpenAICompatibleTranslator(
+                source=source_lang,
+                target=target_lang_code,
+                api_key=api_settings.get('api_key'),
+                base_url=api_settings.get('api_base'),
+                model=api_settings.get('model')
+            )
+
+        # Translate all pages
+        with st.spinner("Translating entire document... This may take a while."):
+            output_doc = pymupdf.open()
+            output_path = f"translated_{file_name}"
+            output_doc = translate_all_pages(
+                doc,
+                output_doc,
+                translator,
+                st.empty(),
+                1,  # Batch size of 1 for progress tracking
+                text_color=text_color,
+                translator_name=translator_type,
+                target_lang=target_lang_code,
+                output_path=output_path
+            )
+            
+            st.session_state.all_translated = True
+            st.session_state.translated_doc = output_path
+            st.success("Complete translation finished!")
+            return output_path
+    except Exception as e:
+        st.error(f"Translation error: {str(e)}")
+        logging.error(f"Translation error: {str(e)}")
+        return None
 
 def main():
     st.set_page_config(layout="wide", page_title="PDF Translator for Human")
@@ -382,8 +433,7 @@ def main():
                 "Model Name",
                 value=TRANSLATOR_CONFIG["openai"]["default_model"]
             )
-            
-            # Store API settings
+              # Store API settings
             st.session_state.api_settings.update({
                 'api_key': api_key,
                 'api_base': api_base,
@@ -394,11 +444,141 @@ def main():
             st.session_state.api_settings.update({
                 'api_base': TRANSLATOR_CONFIG["google"]["default_api_base"]
             })
+            
+        # Add Complete Translation section
+        if uploaded_file is not None:
+            st.markdown("---")
+            st.subheader("Complete Translation")
+            
+            translate_btn = st.button("Generate Complete Translation", key="sidebar_translate_all")
+            if translate_btn:
+                try:
+                    # Initialize translator based on user selection
+                    if translator_type == "Google":
+                        translator = GoogleTranslator(
+                            source=source_lang,
+                            target=target_lang_code
+                        )
+                    else:
+                        translator = OpenAICompatibleTranslator(
+                            source=source_lang,
+                            target=target_lang_code,
+                            api_key=st.session_state.api_settings.get('api_key'),
+                            base_url=st.session_state.api_settings.get('api_base'),
+                            model=st.session_state.api_settings.get('model')
+                        )
 
-    # Main content area
+                    # Translate all pages
+                    with st.spinner("Translating entire document... This may take a while."):
+                        output_doc = pymupdf.open()
+                        output_path = f"translated_{uploaded_file.name}"
+                        output_doc = translate_all_pages(
+                            doc,
+                            output_doc,
+                            translator,
+                            st.empty(),
+                            pages_per_load,
+                            text_color=text_color,
+                            translator_name=translator_type,
+                            target_lang=target_lang_code,
+                            output_path=output_path
+                        )
+                        
+                        st.session_state.all_translated = True
+                        st.session_state.translated_doc = output_path
+                        st.success("Complete translation finished!")
+                except Exception as e:
+                    st.error(f"Translation error: {str(e)}")
+                    logging.error(f"Translation error: {str(e)}")            # Download option in sidebar
+            if st.session_state.all_translated and st.session_state.translated_doc:
+                safe_download_button(
+                    st.session_state.translated_doc,
+                    uploaded_file.name,
+                    button_text="Download Translated PDF",
+                    help_text="Download the complete translated PDF document"
+                )# Main content area
     if uploaded_file is not None:
         doc_bytes = uploaded_file.read()
         doc = pymupdf.open(stream=doc_bytes)
+        
+        # Add a download complete translation section
+        with st.expander("📚 Complete Document Translation", expanded=False):
+            st.markdown("### Download Complete Translation")
+            st.markdown("Translate the entire document and download it as a new PDF file.")
+            
+            dl_col1, dl_col2 = st.columns(2)
+            
+            with dl_col1:
+                translate_all_btn = st.button(
+                    "🔄 Translate Entire Document", 
+                    key="translate_all_btn",
+                    use_container_width=True
+                )
+            
+            with dl_col2:                
+                if st.session_state.all_translated and st.session_state.translated_doc:
+                    try:
+                        if os.path.exists(st.session_state.translated_doc):
+                            with open(st.session_state.translated_doc, "rb") as file:
+                                st.download_button(
+                                    "📥 Download Complete PDF",
+                                    file,
+                                    file_name=f"translated_{uploaded_file.name}",
+                                    mime="application/pdf",
+                                    help="Download the complete translated PDF document",
+                                    use_container_width=True
+                                )
+                        else:
+                            st.error(f"Translation file not found: {st.session_state.translated_doc}")
+                            # Reset session state to allow re-translation
+                            st.session_state.all_translated = False
+                            st.button("📥 Download Complete PDF", disabled=True, use_container_width=True)
+                    except Exception as e:
+                        st.error(f"Error preparing download: {str(e)}")
+                        logging.error(f"Error preparing download: {str(e)}")
+                        st.button("📥 Download Complete PDF", disabled=True, use_container_width=True)
+                else:
+                    st.button("📥 Download Complete PDF", disabled=True, use_container_width=True)
+                    
+            if translate_all_btn:
+                try:
+                    # Initialize translator based on user selection
+                    if translator_type == "Google":
+                        translator = GoogleTranslator(
+                            source=source_lang,
+                            target=target_lang_code
+                        )
+                    else:
+                        translator = OpenAICompatibleTranslator(
+                            source=source_lang,
+                            target=target_lang_code,
+                            api_key=st.session_state.api_settings.get('api_key'),
+                            base_url=st.session_state.api_settings.get('api_base'),
+                            model=st.session_state.api_settings.get('model')
+                        )
+
+                    # Translate all pages
+                    with st.spinner("Translating entire document... This may take a while."):
+                        output_doc = pymupdf.open()
+                        output_path = f"translated_{uploaded_file.name}"
+                        output_doc = translate_all_pages(
+                            doc,
+                            output_doc,
+                            translator,
+                            st.empty(),
+                            pages_per_load,
+                            text_color=text_color,
+                            translator_name=translator_type,
+                            target_lang=target_lang_code,
+                            output_path=output_path
+                        )
+                        
+                        st.session_state.all_translated = True
+                        st.session_state.translated_doc = output_path
+                        st.success("✅ Complete translation finished! You can now download the translated document.")
+                except Exception as e:
+                    st.error(f"Translation error: {str(e)}")
+                    logging.error(f"Translation error: {str(e)}")
         
         # Create two columns for side-by-side display
         col1, col2 = st.columns(2)
@@ -453,95 +633,42 @@ def main():
             except Exception as e:
                 st.error(f"Translation error: {str(e)}")
                 logging.error(f"Translation error: {str(e)}")
-                return
-
-        # Navigation and action buttons
+                return        # Navigation and action buttons
         st.markdown("---")  # Add a separator
-        button_col1, button_col2, button_col3, button_col4 = st.columns(4)
+        button_col1, button_col2, button_col3 = st.columns(3)
         
         # Previous Pages button
         with button_col1:
             if st.session_state.current_page > 0:
-                if st.button("Previous Pages"):
+                if st.button("⬅️ Previous Pages", use_container_width=True):
                     st.session_state.current_page = max(0, st.session_state.current_page - pages_per_load)
                     st.rerun()
             else:
-                st.button("Previous Pages", disabled=True)
+                st.button("⬅️ Previous Pages", disabled=True, use_container_width=True)
         
         # Next Pages button
         with button_col2:
             if st.session_state.current_page + pages_per_load < doc.page_count:
-                if st.button("Next Pages"):
+                if st.button("➡️ Next Pages", use_container_width=True):
                     st.session_state.current_page = min(
                         doc.page_count - 1,
                         st.session_state.current_page + pages_per_load
                     )
                     st.rerun()
             else:
-                st.button("Next Pages", disabled=True)
+                st.button("➡️ Next Pages", disabled=True, use_container_width=True)
         
-        # Translate All button
+        # Go to page button
         with button_col3:
-            if st.button("Translate All", 
-                        disabled=st.session_state.all_translated):
-                try:
-                    # Initialize translator based on user selection
-                    if translator_type == "Google":
-                        translator = GoogleTranslator(
-                            source=source_lang,
-                            target=target_lang_code
-                        )
-                    else:
-                        translator = OpenAICompatibleTranslator(
-                            source=source_lang,
-                            target=target_lang_code,
-                            api_key=st.session_state.api_settings.get('api_key'),
-                            base_url=st.session_state.api_settings.get('api_base'),
-                            model=st.session_state.api_settings.get('model')
-                        )
-
-                    # Translate all pages
-                    output_doc = pymupdf.open()
-                    output_path = f"translated_{uploaded_file.name}"
-                    output_doc = translate_all_pages(
-                        doc,
-                        output_doc,
-                        translator,
-                        st.empty(),
-                        pages_per_load,
-                        text_color=text_color,
-                        translator_name=translator_type,
-                        target_lang=target_lang_code,
-                        output_path=output_path
-                    )
-                    
-                    st.session_state.all_translated = True
-                    st.session_state.translated_doc = output_path
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Translation error: {str(e)}")
-                    logging.error(f"Translation error: {str(e)}")
-                    return
-        
-        # Download button
-        with button_col4:
-            if not st.session_state.all_translated:
-                st.markdown(
-                    """
-                    <div title="You can download the translated file after all content has been translated">
-                        <button style="width: 100%" disabled>Download</button>
-                    </div>
-                    """,
-                    unsafe_allow_html=True
-                )
-            else:
-                with open(st.session_state.translated_doc, "rb") as file:
-                    st.download_button(
-                        "Download",
-                        file,
-                        file_name=f"translated_{uploaded_file.name}",
-                        mime="application/pdf"
-                    )
+            page_num = st.number_input(
+                "Go to page",
+                min_value=1,
+                max_value=doc.page_count,
+                value=st.session_state.current_page + 1
+            )
+            if st.button("Go", use_container_width=True):
+                st.session_state.current_page = page_num - 1  # Convert to 0-based indexing
+                st.rerun()
     else:
         st.info("Please upload a PDF file to begin translation")
 
@@ -562,4 +689,27 @@ def main():
 if __name__ == "__main__":
     args = parse_args()
     update_translator_config(args)
-    main() 
+    main()
+
+def safe_download_button(file_path, original_filename, button_text="Download", help_text=None, use_container_width=False):
+    """Safely create a download button for a file, with error handling"""
+    try:
+        if os.path.exists(file_path):
+            with open(file_path, "rb") as file:
+                return st.download_button(
+                    button_text,
+                    file,
+                    file_name=f"translated_{original_filename}",
+                    mime="application/pdf",
+                    help=help_text,
+                    use_container_width=use_container_width
+                )
+        else:
+            st.error(f"Translation file not found: {file_path}")
+            # Reset session state to allow re-translation
+            st.session_state.all_translated = False
+            return None
+    except Exception as e:
+        st.error(f"Error preparing download: {str(e)}")
+        logging.error(f"Error preparing download: {str(e)}")
+        return None
